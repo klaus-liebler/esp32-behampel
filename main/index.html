@@ -1,0 +1,200 @@
+const char* index_html = R"=====(
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>BeHampel Monitoring System</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.7.2/css/all.min.css'>
+    <style>
+        body {
+            background-color: #fff;
+            font-family: sans-serif;
+            color: #333333;
+            font: 12px Helvetica, sans-serif;
+            box-sizing: border-box;
+        }
+
+        #page {
+            margin: 18px;
+            background-color: #fff;
+        }
+
+        .container {
+            height: inherit;
+            padding-bottom: 18px;
+        }
+
+        .header {
+            padding: 18px;
+        }
+
+        .header h1 {
+            padding-bottom: 0.3em;
+            color: #f4a201;
+            font-size: 25px;
+            font-weight: bold;
+            font-family: Garmond, 'sans-serif';
+            text-align: center;
+        }
+
+        h2 {
+            padding-bottom: 0.2em;
+            border-bottom: 1px solid #eee;
+            margin: 2px;
+            text-align: center;
+        }
+
+        .box-full {
+            padding: 18px;
+            border: 1px solid #ddd;
+            border-radius: 1em 1em 1em 1em;
+            box-shadow: 1px 7px 7px 1px rgba(0, 0, 0, 0.4);
+            background: #fff;
+            margin: 18px;
+            width: 300px;
+        }
+
+        @media (max-width: 494px) {
+            #page {
+                width: inherit;
+                margin: 5px auto;
+            }
+
+            #content {
+                padding: 1px;
+            }
+
+            .box-full {
+                margin: 8px 8px 12px 8px;
+                padding: 10px;
+                width: inherit;
+                ;
+                float: none;
+            }
+        }
+
+        @media (min-width: 494px) and (max-width: 980px) {
+            #page {
+                width: 465px;
+                margin: 0 auto;
+            }
+
+            .box-full {
+                width: 380px;
+            }
+        }
+
+        @media (min-width: 980px) {
+            #page {
+                width: 930px;
+                margin: auto;
+            }
+        }
+
+        .sensor {
+            margin: 10px 0px;
+            font-size: 2.5rem;
+        }
+
+        .sensor-labels {
+            font-size: 1rem;
+            vertical-align: middle;
+            padding-bottom: 15px;
+        }
+
+        .units {
+            font-size: 1.2rem;
+        }
+
+        hr {
+            height: 1px;
+            color: #eee;
+            background-color: #eee;
+            border: none;
+        }
+    </style>
+
+    <script>
+        setInterval(loadDoc, 1000)
+        function loadDoc() {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function () {
+                if (this.readyState == 4 && this.status == 200) {
+                    let obj = JSON.parse(this.responseText);
+                    document.getElementById("state").innerText = obj.state;
+                    document.getElementById("temperature").innerText = obj.temperature;
+                    document.getElementById("humidity").innerText = obj.humidity;
+                    document.getElementById("pressure").innerText = obj.pressure;
+                    document.getElementById("co2").innerText = obj.co2;
+
+                }
+            };
+            xhttp.open("GET", "/data", true);
+            xhttp.send();
+        }
+    </script>
+
+</head>
+
+<body>
+    <div id='page'>
+        <div class='header'>
+            <h1>BeHampel Monitoring System</h1>
+        </div>
+        <div id='content' align='center'>
+            <div class='box-full' align='left'>
+                <h2>IAQ Status:<span id='state'></span></h2>
+                <div class='sensors-container'>
+
+
+                    <div class='sensors'>
+                        <p class='sensor'>
+                            <i class='fas fa-thermometer-half' style='color:#0275d8'></i>
+                            <span class='sensor-labels'> Temperature </span><span id='temperature'></span>
+                            <sup class='units'>°C</sup>
+                        </p>
+                        <hr>
+
+
+                        <p class='sensor'>
+                            <i class='fas fa-tint' style='color:#0275d8'></i>
+                            <span class='sensor-labels'> Humidity </span><span id='humidity'></span>
+                            <sup class='units'>%</sup>
+                        </p>
+                        <hr>
+
+
+                        <p class='sensor'>
+                            <i class='fas fa-tachometer-alt' style='color:#ff0040'></i>
+                            <span class='sensor-labels'> Pressure </span><span id='pressure'></span>
+                            <sup class='units'>hPa</sup>
+                        </p>
+                        <hr>
+
+
+                        <p class='sensor'>
+                            <i class='fab fa-cloudversify' style='color:#483d8b'></i>
+                            <span class='sensor-labels'> IAQ </span><span id='IAQ'></span>
+                            <sup class='units'>PPM</sup>
+                        </p>
+                        <hr>
+
+
+                        <p class='sensor'>
+                            <i class='fas fa-smog' style='color:#35b22d'></i>
+                            <span class='sensor-labels'> Co2 Eq. </span><span id='co2'></span>
+                            <sup class='units'>PPM</sup>
+                        </p>
+                        <hr>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
+)=====";
