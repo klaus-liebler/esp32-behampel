@@ -13,6 +13,7 @@
 
 #include "connect.h"
 #include <esp_http_server.h>
+#include <mqtt_client.h>
 
 #include <driver/ledc.h>
 #include <driver/i2c.h>
@@ -63,7 +64,10 @@ OneWireBus *owb;
 Ringtoneplayer ringtoneplayer;
 
 //Managementobjekt Webserver
-httpd_handle_t server;
+httpd_handle_t server=NULL;
+
+//Managementobjekt MQTT client
+esp_mqtt_client_handle_t mqttClient;
 
 //"Datenmodell" durch einfache globale Variablen
 float temperature, humidity, pressure, co2;
@@ -106,20 +110,15 @@ static const httpd_uri_t get_root = {
     .user_ctx = 0,
 };
 
-//Wird aufgerufen, sobald eine Verbindung mit dem WIFI besteht. Dann kann der Webserver gestartet werden
-extern "C" void connect_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
-{
-  if (server != NULL)
-    return;
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.uri_match_fn = httpd_uri_match_wildcard;
-  const char *hostnameptr;
-  tcpip_adapter_get_hostname(TCPIP_ADAPTER_IF_STA, &hostnameptr);
-  ESP_ERROR_CHECK(httpd_start(&server, &config));
-  ESP_LOGI(TAG, "HTTPd successfully started for website http://%s:%d", hostnameptr, config.server_port);
-  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &get_data));
-  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &get_root));
-}
+static const esp_mqtt_client_config_t mqtt_cfg={
+  .uri = CONFIG_MQTT_SERVER,
+  .port = CONFIG_MQTT_PORT,
+  .username = CONFIG_MQTT_USER,
+  .password = CONFIG_MQTT_PASS,
+  .refresh_connection_after_ms=0,
+};
+
+
 
 int64_t GetMillis64()
 {
@@ -128,6 +127,33 @@ int64_t GetMillis64()
 
 uint64_t lastSensorUpdate = 0;
 uint64_t lastMQTTUpdate = 0;
+
+extern "C" void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+  ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
+  esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+  switch ((esp_mqtt_event_id_t)event_id)
+  {
+  case MQTT_EVENT_CONNECTED:
+    ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+    break;
+  case MQTT_EVENT_DISCONNECTED:
+    ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+    break;
+  case MQTT_EVENT_PUBLISHED:
+    ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+    break;
+    break;
+  case MQTT_EVENT_ERROR:
+    ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+    break;
+  default:
+    ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+    break;
+  }
+}
+
+
 
 //Funktion wird automatisch vom Framework einmalig beim einschalten bzw nach Reset aufgerufen
 extern "C" void app_main()
@@ -140,7 +166,22 @@ extern "C" void app_main()
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   ESP_ERROR_CHECK(connect());
-  ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, 0));
+
+  //Verbindung steht. Starte jetzt dem HTTP-Server und den MQTT-Client
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.uri_match_fn = httpd_uri_match_wildcard;
+  const char *hostnameptr;
+  tcpip_adapter_get_hostname(TCPIP_ADAPTER_IF_STA, &hostnameptr);
+  ESP_ERROR_CHECK(httpd_start(&server, &config));
+  ESP_LOGI(TAG, "HTTPd successfully started for website http://%s:%d", hostnameptr, config.server_port);
+  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &get_data));
+  ESP_ERROR_CHECK(httpd_register_uri_handler(server, &get_root));
+
+   mqttClient = esp_mqtt_client_init(&mqtt_cfg);
+  /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
+  esp_mqtt_client_register_event(mqttClient, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+  esp_mqtt_client_start(mqttClient);
+  
 
   //Konfiguriert die I2C-Schnittstelle zur Anbindung der Sensoren BME280 und CCS811
   i2c_config_t conf;
@@ -217,6 +258,7 @@ extern "C" void app_main()
       //Zuerst vom BME280
       float dummy;
       bme280->GetDataAndTriggerNextMeasurement(&dummy, &pressure, &humidity);
+      pressure/=100;
 
       //Hole die Temperatur vom präzisen OneWire-Sensor und starte direkt den nächsten Messzyklus
       ds18b20_read_temp(ds18b20_info, &(temperature));
@@ -225,7 +267,7 @@ extern "C" void app_main()
       //...und bastele aus den Messdaten ein JSON-Datenpaket zusammen
       const char *state = co2 < 800.0 ? "Gut" : "Schlecht";
       snprintf(jsonBuffer, sizeof(jsonBuffer), "{\"state\":\"%s\",\"temperature\":%.1f,\"humidity\":%.0f, \"pressure\":%.0f, \"co2\":%.0f}", state, temperature, humidity, pressure, co2);
-      //ESP_LOGI(TAG, jsonBuffer);
+      ESP_LOGI(TAG, "%s", jsonBuffer);
 
       //...und führe die Lampen-Sound-Logik aus
       //Errechne ausgehend vom CO2-Messwert die anzuzeigende Farbe (RGB-Darstellung), https://www.rapidtables.com/web/color/RGB_Color.html
@@ -257,6 +299,13 @@ extern "C" void app_main()
       }
 
       lastSensorUpdate = now;
+    }
+    //Schreibe alle 20 Sekunden die aktuellen Messwerte per MQTT raus
+    if (now - lastMQTTUpdate > 20000 && mqttClient)
+    {
+      ESP_LOGI(TAG, "Publishing to MQTT...");
+      esp_mqtt_client_publish(mqttClient, CONFIG_MQTT_TOPIC, jsonBuffer, 0, 0, 0);
+      lastMQTTUpdate = now;
     }
   }
 }

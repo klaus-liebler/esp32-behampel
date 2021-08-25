@@ -1,7 +1,7 @@
 menu "BehAmpel"
     config MQTT_SERVER 
         string "MQTT Server"
-        default "test.mosquitto.org"
+        default "mqtt://test.mosquitto.org"
 
     config MQTT_PORT
         int "MQTT Port"
