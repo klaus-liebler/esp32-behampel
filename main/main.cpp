@@ -11,7 +11,7 @@
 #include <nvs_flash.h>
 #include <esp_netif.h>
 
-#include "connect.h"
+#include "network.h"
 #include <esp_http_server.h>
 #include <mqtt_client.h>
 
@@ -143,7 +143,6 @@ extern "C" void mqtt_event_handler(void *handler_args, esp_event_base_t base, in
   case MQTT_EVENT_PUBLISHED:
     ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
     break;
-    break;
   case MQTT_EVENT_ERROR:
     ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
     break;
@@ -165,7 +164,7 @@ extern "C" void app_main()
   ESP_ERROR_CHECK(nvs_flash_init());
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
-  ESP_ERROR_CHECK(connect());
+  ESP_ERROR_CHECK(connectBlocking());
 
   //Verbindung steht. Starte jetzt dem HTTP-Server und den MQTT-Client
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -303,7 +302,7 @@ extern "C" void app_main()
     //Schreibe alle 20 Sekunden die aktuellen Messwerte per MQTT raus
     if (now - lastMQTTUpdate > 20000 && mqttClient)
     {
-      ESP_LOGI(TAG, "Publishing to MQTT...");
+      ESP_LOGI(TAG, "Publishing to MQTT Topic %s", CONFIG_MQTT_TOPIC);
       esp_mqtt_client_publish(mqttClient, CONFIG_MQTT_TOPIC, jsonBuffer, 0, 0, 0);
       lastMQTTUpdate = now;
     }

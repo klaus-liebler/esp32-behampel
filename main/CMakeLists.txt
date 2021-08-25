@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "connect.c" "main.cpp"
+    SRCS "network.c" "main.cpp"
     INCLUDE_DIRS ""
 )

@@ -16,12 +16,17 @@ extern "C" {
 #include "esp_err.h"
 #include "esp_netif.h"
 
-#ifdef CONFIG_EXAMPLE_CONNECT_ETHERNET
-#define EXAMPLE_INTERFACE get_example_netif()
+#ifdef CONFIG_NETWORK_CONNECT_ETHERNET
+#define EXAMPLE_INTERFACE get_NETWORK_netif()
 #endif
 
-#ifdef CONFIG_EXAMPLE_CONNECT_WIFI
-#define EXAMPLE_INTERFACE get_example_netif()
+#ifdef CONFIG_NETWORK_CONNECT_WIFI
+#define EXAMPLE_INTERFACE get_NETWORK_netif()
+#endif
+
+#if !defined (CONFIG_NETWORK_CONNECT_ETHERNET) && !defined (CONFIG_NETWORK_CONNECT_WIFI)
+// This is useful for some tests which do not need a network connection
+#define EXAMPLE_INTERFACE NULL
 #endif
 
 /**
@@ -39,7 +44,7 @@ extern "C" {
  *
  * @return ESP_OK on successful connection
  */
-esp_err_t connect(void);
+esp_err_t connectBlocking(void);
 
 /**
  * Counterpart to example_connect, de-initializes Wi-Fi or Ethernet
@@ -52,13 +57,27 @@ esp_err_t disconnect(void);
  * This helper function is used in ASIO examples. It wraps installing the
  * UART driver and configuring VFS layer to use UART driver for console I/O.
  */
-esp_err_t example_configure_stdin_stdout(void);
+esp_err_t  configure_stdin_stdout(void);
 
 /**
  * @brief Returns esp-netif pointer created by example_connect()
  *
+ * @note If multiple interfaces active at once, this API return NULL
+ * In that case the get_NETWORK_netif_from_desc() should be used
+ * to get esp-netif pointer based on interface description
  */
-esp_netif_t *get_netif(void);
+esp_netif_t *get_NETWORK_netif(void);
+
+/**
+ * @brief Returns esp-netif pointer created by example_connect() described by
+ * the supplied desc field
+ *
+ * @param desc Textual interface of created network interface, for example "sta"
+ * indicate default WiFi station, "eth" default Ethernet interface.
+ *
+ */
+esp_netif_t *get_NETWORK_netif_from_desc(const char *desc);
+
 #ifdef __cplusplus
 }
 #endif
