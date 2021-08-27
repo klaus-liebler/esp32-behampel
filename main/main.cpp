@@ -27,7 +27,9 @@
 #include "ws2812_strip.hh"
 #include "esp_log.h"
 
-#include "ringtoneplayer.hh"
+//#include "ringtoneplayer.hh"
+#include "Alarm.mp3.h"
+#include "mp3player.hh"
 
 #define TAG "main"
 
@@ -61,7 +63,8 @@ owb_rmt_driver_info rmt_driver_info;
 OneWireBus *owb;
 
 //Managementobjekte für die Sound-Wiedergabe
-Ringtoneplayer ringtoneplayer;
+//Ringtoneplayer ringtoneplayer;
+MP3Player mp3player;
 
 //Managementobjekt Webserver
 httpd_handle_t server=NULL;
@@ -237,16 +240,22 @@ extern "C" void app_main()
   strip->Refresh(TIMEOUT_FOR_LED_STRIP);
   ESP_LOGI(TAG, "LED: WS2812_Strip successfully initialized (if you see R G B)");
 
-  ringtoneplayer.Setup(LEDC_TIMER_2, LEDC_CHANNEL_2, GPIO_NUM_25);
-  ringtoneplayer.PlaySong(1);
-  ringtoneplayer.Loop();
+  //Konfiguriert die Tonwiedergabe
+  //ringtoneplayer.Setup(LEDC_TIMER_2, LEDC_CHANNEL_2, GPIO_NUM_25);
+  //ringtoneplayer.PlaySong(1);
+  //ringtoneplayer.Loop();
+
+  mp3player.SetupInternalDAC();
+  mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
+  mp3player.Loop();
 
   // Die ganze Initializierung und Konfiguration ist an dieser Stelle zu Ende (puuuh...) - ab hier beginnt die "Endlos-Arbeits-Schleife"
 
   while (true)
   {
-    //Der Klingelton-Player muss permanent prüfen, ob er eine neue Note auf dem Lautsprecher ausgeben sollte. Das tut er hier
-    ringtoneplayer.Loop();
+    //Der Musik-Player muss permanent prüfen, ob er eine neue Note auf dem Lautsprecher ausgeben sollte. Das tut er hier
+    //ringtoneplayer.Loop();
+    mp3player.Loop();
 
     //Hole die aktuelle Zeit
     uint64_t now = GetMillis64();
@@ -288,7 +297,8 @@ extern "C" void app_main()
       {
         if (!hasAlreadePlayedTheWarnSound)
         {
-          ringtoneplayer.PlaySong(2);
+          //ringtoneplayer.PlaySong(2);
+          mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
           hasAlreadePlayedTheWarnSound = true;
         }
       }
@@ -306,5 +316,7 @@ extern "C" void app_main()
       esp_mqtt_client_publish(mqttClient, CONFIG_MQTT_TOPIC, jsonBuffer, 0, 0, 0);
       lastMQTTUpdate = now;
     }
+    //Muss
+    vTaskDelay(1);
   }
 }
