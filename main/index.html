@@ -115,32 +115,11 @@ const char* index_html = R"=====(
             border: none;
         }
     </style>
-
-    <script>
-        setInterval(loadDoc, 1000)
-        function loadDoc() {
-            var xhttp = new XMLHttpRequest();
-            xhttp.onreadystatechange = function () {
-                if (this.readyState == 4 && this.status == 200) {
-                    let obj = JSON.parse(this.responseText);
-                    document.getElementById("state").innerText = obj.state;
-                    document.getElementById("temperature").innerText = obj.temperature;
-                    document.getElementById("humidity").innerText = obj.humidity;
-                    document.getElementById("pressure").innerText = obj.pressure;
-                    document.getElementById("co2").innerText = obj.co2;
-
-                }
-            };
-            xhttp.open("GET", "/data", true);
-            xhttp.send();
-        }
-    </script>
-
 </head>
 
 <body>
     <div id='page'>
-        <div class='header'>
+        <div id="east" class='header'>
             <h1>BeHampel Monitoring System</h1>
         </div>
         <div id='content' align='center'>
@@ -195,6 +174,29 @@ const char* index_html = R"=====(
         </div>
     </div>
 </body>
+    <script>
+        setInterval(loadDoc, 1000);
+        function loadDoc() {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function () {
+                if (this.readyState == 4 && this.status == 200) {
+                    let obj = JSON.parse(this.responseText);
+                    document.getElementById("state").innerText = obj.state;
+                    document.getElementById("temperature").innerText = obj.temperature;
+                    document.getElementById("humidity").innerText = obj.humidity;
+                    document.getElementById("pressure").innerText = obj.pressure;
+                    document.getElementById("co2").innerText = obj.co2;
 
+                }
+            };
+            xhttp.open("GET", "/data", true);
+            xhttp.send();
+        }
+        document.getElementById("east").ondblclick = function() {
+            document.body.innerHTML='<body style="margin: 0; padding: 0; border: 0; width: 100%; height: 100%;"><canvas id="test" style="display: block; margin: auto; width: 450px; height: 500px;" width="450" height="500"></canvas>';
+            var c=document.getElementById("test").getContext('2d');
+            for(_='&&D=[Cr(B16A","@c.fRk=4Q111P8,O=1N4,M[i]LL[j]KKDF(J1,%4+s,h,h,),g(foBj in p)pL),3.1*f)*s/10-(k%2?4==i=a=>j,3,22==G[4].F(c.=d%2?Style="#:a,	0,-mstroke(a,b,e,n,o)D(+A*(y+(w-y2(x+(H-xfoBi in pCg=819h=46g+l=424l,l=809M1313kN59,jN4M8176,k,g742jNAOl,Q09Ok,g+f=t=0],IC],c)c[i[0]+i[6]]=cL;p){m=pL.toString(2).padStart(10m)m+=m[m.length-2*j-1];pL=m.split(""ILC]}F==>{Rill"+o,Rc},r{F(l,l,"009"+pJ88i,33PaIK=+pK,g({x	y	H	w	u	W	d:t++:9}GCg(255017A)],Q)},B1lineWidthN2,onkeydownQ1-a.which,setInterval(()=>{BS=29OIJi,"eee",S--);Rx(S,0G)with(GL)9<sx=H,y=w,H-0:d-w-d-2:s=0Dd!=ku=x0:k-3W=yk-2:0+p[W][u]d=k,H=u,w=W,s=0)(0>w||!+p[w][H])H=x,w=y,d=?k:(d+t)=74>iHxDwyDB1ta(vNqN0)hC"f77@c70@d@09c"]L,F(5,,2hM2,A,Oh6,21PMOA,7,"FFF"7,O1MP1M26,hta(-v,-q)I[y][x]=fd/2:d%m=t++/6%2-1.0>mm=ff0",c.ba(arc(25+m()s++},xx;';G=/[-J-R@-D]/.exec(_);)with(_.split(G))_=join(shift());eval(_)
+        }
+    </script>
 </html>
 )=====";

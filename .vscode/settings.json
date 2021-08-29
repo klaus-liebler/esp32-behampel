@@ -10,6 +10,7 @@
         "*.ipp": "cpp",
         "*.html": "cpp",
         "*.tcc": "cpp",
-        "ostream": "cpp"
+        "ostream": "cpp",
+        "functional": "cpp"
     }
 }
