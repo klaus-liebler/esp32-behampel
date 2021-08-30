@@ -34,39 +34,42 @@
 #define TAG "main"
 
 //Diverse konstante Werte werden gesetzt
+//Hier wird festgelegt, an welchen Anschlüssen der CPU welche anderen Bauteile angeschlossen sind.
+//Der ESP32 ist da sehr flexibel, und kann fast(!) alle Funktionen an fast(!) alle Pins legen
 constexpr gpio_num_t PIN_LED_STRIP = GPIO_NUM_26;
 constexpr gpio_num_t PIN_ONEWIRE = GPIO_NUM_14;
 constexpr gpio_num_t PIN_I2C_SDA = GPIO_NUM_22;
 constexpr gpio_num_t PIN_I2C_SCL = GPIO_NUM_21;
-constexpr uint8_t I2C_PORT = 1;
+
 
 constexpr size_t LED_NUMBER = 8;
 constexpr uint32_t TIMEOUT_FOR_LED_STRIP = 1000;
+//Festlegung, welche internen Funktionseinheiten verwendet werden sollen
+constexpr uint8_t I2C_PORT = 1;
 constexpr rmt_channel_t CHANNEL_WS2812 = RMT_CHANNEL_0;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_TX = RMT_CHANNEL_1;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_RX = RMT_CHANNEL_2;
 
-constexpr uint8_t CCS811_ADDR = 0x5A; //or 0x5B
 
 //Managementobjekt für die RGB-LEDs
 WS2812_Strip<LED_NUMBER> *strip = NULL;
 
 //Managementobjekt für den CO2-Sensor
+//constexpr uint8_t CCS811_ADDR = 0x5A; //or 0x5B
 //TODO
 
 //Managementobjekt für den Temperatur/Luftdruck/Luftfeuchtigkeitssensor
 BME280 *bme280;
 
-//Managementobjekte für den präzisen Temperatursensor, der an Pin 14 (GPIO_NUM_14) hängt
+//Managementobjekte für den präzisen 1Wire-Temperatursensor
 DS18B20_Info *ds18b20_info = NULL;
 owb_rmt_driver_info rmt_driver_info;
 OneWireBus *owb;
 
 //Managementobjekte für die Sound-Wiedergabe
-//Ringtoneplayer ringtoneplayer;
 MP3Player mp3player;
 
-//Managementobjekt Webserver
+//Managementobjekte für den Webserver
 httpd_handle_t server=NULL;
 
 //Managementobjekt MQTT client
@@ -75,37 +78,25 @@ esp_mqtt_client_handle_t mqttClient;
 //"Datenmodell" durch einfache globale Variablen
 float temperature, humidity, pressure, co2;
 
+//"Schmierblatt", um ein JSON-Datenpaket zusammenbauen zu können (max. 300 Zeichen lang...)
 char jsonBuffer[300];
 
+//Merkt sich, ob der Warnton beim Überschreiten eines kritischen Messwertes bereits ausgegeben wurde. 
+//Verhindert mit der entsprechenden Logik (s.u.), dass die Warnung in jedem Schleifendurchlauf ausgegeben wird
 bool hasAlreadePlayedTheWarnSound = false;
 
-long lastMsg = 0;
-char msg[50];
-int value = 0;
-
+//Bindet die Datei index.html als Rohtext-Variable ein
 #include "index.html"
 
-esp_err_t handle_get_root(httpd_req_t *req) //browser get application itself
+
+//Konfiguration des Webservers
+//letztlich die Festlegung, was gemacht werden soll, wenn eine bestimmte URL aufgerufen wird
+esp_err_t handle_get_root(httpd_req_t *req)
 {
   httpd_resp_set_type(req, "text/html");
   ESP_ERROR_CHECK(httpd_resp_send(req, index_html, -1)); // -1 = use strlen()
   return ESP_OK;
 }
-
-esp_err_t handle_get_data(httpd_req_t *req)
-{
-  httpd_resp_set_type(req, "application/json");
-  ESP_ERROR_CHECK(httpd_resp_send(req, jsonBuffer, -1)); // -1 = use strlen()
-  return ESP_OK;
-}
-
-static const httpd_uri_t get_data = {
-    .uri = "/data",
-    .method = HTTP_GET,
-    .handler = handle_get_data,
-    .user_ctx = 0,
-};
-
 static const httpd_uri_t get_root = {
     .uri = "/*",
     .method = HTTP_GET,
@@ -113,6 +104,21 @@ static const httpd_uri_t get_root = {
     .user_ctx = 0,
 };
 
+esp_err_t handle_get_data(httpd_req_t *req)
+{
+  httpd_resp_set_type(req, "application/json");
+  ESP_ERROR_CHECK(httpd_resp_send(req, jsonBuffer, -1)); // -1 = use strlen()
+  return ESP_OK;
+}
+static const httpd_uri_t get_data = {
+    .uri = "/data",
+    .method = HTTP_GET,
+    .handler = handle_get_data,
+    .user_ctx = 0,
+};
+
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+//Konfiguration des MQTT-Clients
 static const esp_mqtt_client_config_t mqtt_cfg={
   .uri = CONFIG_MQTT_SERVER,
   .port = CONFIG_MQTT_PORT,
@@ -121,16 +127,18 @@ static const esp_mqtt_client_config_t mqtt_cfg={
   .refresh_connection_after_ms=0,
 };
 
-
-
+//Hilfsfunktion, um die abgelaufene Zeit in ms zu bekommen
 int64_t GetMillis64()
 {
   return esp_timer_get_time() / 1000ULL;
 }
 
+//Variablen merken sich, wann eine Aktion zuletzt ausgeführt wurde
 uint64_t lastSensorUpdate = 0;
 uint64_t lastMQTTUpdate = 0;
 
+//Diese Funktion wird vom MQTT-Client aufgerufen, wenn "etwas spannendes" passiert.
+//Das Ereignis wird einfach nur mal ausgegeben
 extern "C" void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
   ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
@@ -169,7 +177,8 @@ extern "C" void app_main()
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   ESP_ERROR_CHECK(connectBlocking());
 
-  //Verbindung steht. Starte jetzt dem HTTP-Server und den MQTT-Client
+  //Verbindung steht. 
+  //Starte jetzt dem HTTP-Server
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
   const char *hostnameptr;
@@ -179,8 +188,8 @@ extern "C" void app_main()
   ESP_ERROR_CHECK(httpd_register_uri_handler(server, &get_data));
   ESP_ERROR_CHECK(httpd_register_uri_handler(server, &get_root));
 
-   mqttClient = esp_mqtt_client_init(&mqtt_cfg);
-  /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
+  //Starte jetzt den MQTT-Client
+  mqttClient = esp_mqtt_client_init(&mqtt_cfg);
   esp_mqtt_client_register_event(mqttClient, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
   esp_mqtt_client_start(mqttClient);
   
@@ -238,13 +247,9 @@ extern "C" void app_main()
   strip->SetPixel(1, CRGB::Green);
   strip->SetPixel(2, CRGB::Blue);
   strip->Refresh(TIMEOUT_FOR_LED_STRIP);
-  ESP_LOGI(TAG, "LED: WS2812_Strip successfully initialized (if you see R G B)");
+  ESP_LOGI(TAG, "LED: WS2812_Strip successfully initialized (if you see a red, green and blue)");
 
   //Konfiguriert die Tonwiedergabe
-  //ringtoneplayer.Setup(LEDC_TIMER_2, LEDC_CHANNEL_2, GPIO_NUM_25);
-  //ringtoneplayer.PlaySong(1);
-  //ringtoneplayer.Loop();
-
   mp3player.SetupInternalDAC();
   mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
   mp3player.Loop();
@@ -254,7 +259,6 @@ extern "C" void app_main()
   while (true)
   {
     //Der Musik-Player muss permanent prüfen, ob er eine neue Note auf dem Lautsprecher ausgeben sollte. Das tut er hier
-    //ringtoneplayer.Loop();
     mp3player.Loop();
 
     //Hole die aktuelle Zeit
@@ -297,7 +301,6 @@ extern "C" void app_main()
       {
         if (!hasAlreadePlayedTheWarnSound)
         {
-          //ringtoneplayer.PlaySong(2);
           mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
           hasAlreadePlayedTheWarnSound = true;
         }
@@ -316,7 +319,7 @@ extern "C" void app_main()
       esp_mqtt_client_publish(mqttClient, CONFIG_MQTT_TOPIC, jsonBuffer, 0, 0, 0);
       lastMQTTUpdate = now;
     }
-    //Muss
+    //Muss aus technischen Gründen einmal im Durchlauf aufgerufen werden, weil sonst der "Watchdog" nicht ausgeführt werden kann
     vTaskDelay(1);
   }
 }

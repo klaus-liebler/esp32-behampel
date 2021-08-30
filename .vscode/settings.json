@@ -11,6 +11,7 @@
         "*.html": "cpp",
         "*.tcc": "cpp",
         "ostream": "cpp",
-        "functional": "cpp"
+        "functional": "cpp",
+        "*.inc": "cpp"
     }
 }
