@@ -1,0 +1,58 @@
+#include <stdio.h>
+#include "sdkconfig.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <driver/gpio.h>
+#include <esp_system.h>
+#include <esp_spi_flash.h>
+#include <esp_wifi.h>
+#include <esp_event.h>
+#include <sys/param.h>
+#include <nvs_flash.h>
+#include <esp_netif.h>
+#include <driver/i2c.h>
+#include <driver/rmt.h>
+#include "ws2812_strip.hh"
+
+
+
+constexpr gpio_num_t PIN_LED_STRIP = GPIO_NUM_26;
+constexpr size_t LED_NUMBER = 8;
+constexpr uint32_t TIMEOUT_FOR_LED_STRIP = 1000;
+constexpr rmt_channel_t CHANNEL_WS2812 = RMT_CHANNEL_0;
+
+WS2812_Strip<LED_NUMBER> *strip = NULL;
+
+//Funktion wird automatisch vom Framework einmalig beim einschalten bzw nach Reset aufgerufen
+extern "C" void app_main()
+{
+  
+  //Konfiguriert den 8fach-RGB-LED-Strip
+  strip = new WS2812_Strip<LED_NUMBER>(CHANNEL_WS2812);
+  ESP_ERROR_CHECK(strip->Init(PIN_LED_STRIP));
+  ESP_ERROR_CHECK(strip->Clear(TIMEOUT_FOR_LED_STRIP));
+  strip->SetPixel(0, CRGB::Red);
+  strip->SetPixel(1, CRGB::Green);
+  strip->SetPixel(2, CRGB::Blue);
+  strip->Refresh(TIMEOUT_FOR_LED_STRIP);
+
+  
+  // Die ganze Initializierung und Konfiguration ist an dieser Stelle zu Ende (puuuh...) - ab hier beginnt die "Endlos-Arbeits-Schleife"
+  int i=0;
+  while (true)
+  {
+      i=i+1;
+      printf("Hallo Welt %d\n",i);
+      strip->SetPixel(0, CRGB::Red);
+      strip->SetPixel(1, CRGB::Green);
+      strip->SetPixel(2, CRGB::Blue);
+      ESP_ERROR_CHECK(strip->Refresh(TIMEOUT_FOR_LED_STRIP));
+      vTaskDelay(500/portTICK_PERIOD_MS);
+      strip->SetPixel(0, CRGB::Yellow);
+      strip->SetPixel(1, CRGB::Yellow);
+      strip->SetPixel(2, CRGB::Yellow);
+      ESP_ERROR_CHECK(strip->Refresh(TIMEOUT_FOR_LED_STRIP));
+      vTaskDelay(500/portTICK_PERIOD_MS);
+      
+  }
+}
