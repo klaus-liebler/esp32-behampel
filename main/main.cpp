@@ -54,16 +54,11 @@ constexpr rmt_channel_t CHANNEL_ONEWIRE_RX = RMT_CHANNEL_2;
 //Managementobjekt für die RGB-LEDs
 WS2812_Strip<LED_NUMBER> *strip = NULL;
 
-//Managementobjekt für den CO2-Sensor
-//constexpr uint8_t CCS811_ADDR = 0x5A; //or 0x5B
-//TODO
-
 //Managementobjekt für den Temperatur/Luftdruck/Luftfeuchtigkeitssensor
 BME280 *bme280;
 
 //Managementobjekt für den Luftqualitätssensor
 CCS811Manager *ccs811;
-
 
 //Managementobjekte für den präzisen 1Wire-Temperatursensor
 DS18B20_Info *ds18b20_info = NULL;
@@ -80,17 +75,17 @@ httpd_handle_t server=NULL;
 esp_mqtt_client_handle_t mqttClient;
 
 //"Datenmodell" durch einfache globale Variablen
-float temperature;
+float temperature{0};
 float humidity{0};
 float pressure{0};
-uint16_t co2{0};
+uint16_t co2{0}; // 16bit = 65536 verschiedene Werte. Weil "unsigned", wird das als Zahlen von 0 bis 65535 interpretiert
 
 //"Schmierblatt", um ein JSON-Datenpaket zusammenbauen zu können (max. 300 Zeichen lang...)
 char jsonBuffer[300];
 
 //Merkt sich, ob der Warnton beim Überschreiten eines kritischen Messwertes bereits ausgegeben wurde. 
 //Verhindert mit der entsprechenden Logik (s.u.), dass die Warnung in jedem Schleifendurchlauf ausgegeben wird
-bool hasAlreadePlayedTheWarnSound = false;
+bool hasAlreadyPlayedTheWarnSound = false;
 
 //Bindet die Datei index.html als Rohtext-Variable ein
 #include "index.html"
@@ -105,22 +100,24 @@ esp_err_t handle_get_root(httpd_req_t *req)
   return ESP_OK;
 }
 static const httpd_uri_t get_root = {
-    .uri = "/*",
-    .method = HTTP_GET,
-    .handler = handle_get_root,
+    .uri = "/*", //wenn immer ein Browser mit irgendeiner (*!) Adresse den labathome anfragt..
+    .method = HTTP_GET, //...und zwar mit dem "Standardanfragetyp" "GET"
+    .handler = handle_get_root, //...dann mache bitte das, was in dieser Funktion steht
     .user_ctx = 0,
 };
 
 esp_err_t handle_get_data(httpd_req_t *req)
 {
   httpd_resp_set_type(req, "application/json");
+  //Nachdem die eigentliche HTML-Seite (s.o.) an den Browser übertragen wurde, macht dieser eine eigene spezielle Datenverbindung mit labathome auf, über die
+  //sekündlich die aktuellen Messwerte übertragen werden. Diese Messwerte stehen im sog. JSON-Format im jsonBuffer (oben als "Schmierblatt" bezeichnet)
   ESP_ERROR_CHECK(httpd_resp_send(req, jsonBuffer, -1)); // -1 = use strlen()
   return ESP_OK;
 }
 static const httpd_uri_t get_data = {
-    .uri = "/data",
+    .uri = "/data", //wenn der Browser aber speziell die Adresse /data abfragt
     .method = HTTP_GET,
-    .handler = handle_get_data,
+    .handler = handle_get_data, //dann soll dieses hier passieren
     .user_ctx = 0,
 };
 
@@ -185,7 +182,7 @@ extern "C" void app_main()
   ESP_ERROR_CHECK(connectBlocking());
 
   //Verbindung steht. 
-  //Starte jetzt dem HTTP-Server
+  //Starte jetzt den HTTP-Server
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
   const char *hostnameptr;
@@ -226,6 +223,7 @@ extern "C" void app_main()
     ESP_LOGW(TAG, "I2C: BME280 not found");
   }
 
+  //CCS811
   ccs811 = new CCS811Manager((i2c_port_t)I2C_PORT, (gpio_num_t)GPIO_NUM_NC, CCS811::ADDRESS::ADDR0);
   if(ccs811->Init()==ESP_OK){
     ccs811->Start(CCS811::MODE::_1SEC);
@@ -268,15 +266,15 @@ extern "C" void app_main()
 
   //Konfiguriert die Tonwiedergabe
   mp3player.SetupInternalDAC();
-  mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
-  mp3player.Loop();
+  //mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
+  //mp3player.Loop();
 
   // Die ganze Initializierung und Konfiguration ist an dieser Stelle zu Ende (puuuh...) - ab hier beginnt die "Endlos-Arbeits-Schleife"
 
   while (true)
   {
     //Der Musik-Player muss permanent prüfen, ob er eine neue Note auf dem Lautsprecher ausgeben sollte. Das tut er hier
-    mp3player.Loop();
+    //mp3player.Loop();
 
     //Hole die aktuelle Zeit
     uint64_t now = GetMillis64();
@@ -287,7 +285,7 @@ extern "C" void app_main()
       //Zuerst vom BME280
       float dummyF;
       bme280->GetDataAndTriggerNextMeasurement(&dummyF, &pressure, &humidity);
-      pressure/=100;
+      pressure=pressure/100;
 
       uint16_t dummyU16[3];
       //dann vom CCS811
@@ -320,15 +318,15 @@ extern "C" void app_main()
       //gebe außerdem der Sound-Wiedergabe vor, was Sie zu machen hat (Sound Starten bzw zurücksetzen)
       if (co2 > 1000)
       {
-        if (!hasAlreadePlayedTheWarnSound)
+        if (!hasAlreadyPlayedTheWarnSound)
         {
-          mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
-          hasAlreadePlayedTheWarnSound = true;
+          //mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
+          hasAlreadyPlayedTheWarnSound = true;
         }
       }
       else
       {
-        hasAlreadePlayedTheWarnSound = false;
+        hasAlreadyPlayedTheWarnSound = false;
       }
 
       lastSensorUpdate = now;
