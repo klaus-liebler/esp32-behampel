@@ -181,7 +181,6 @@ bool AudioOutputI2S::begin(bool txDAC)
     }
 
     i2s_comm_format_t comm_fmt = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S);
-  ESP_LOGI(TAG, "Prepare Config");
     i2s_config_t i2s_config_dac = {
         .mode = mode,
         .sample_rate = 44100,
@@ -194,29 +193,23 @@ bool AudioOutputI2S::begin(bool txDAC)
         .use_apll = use_apll, // Use audio PLL
         .tx_desc_auto_clear = false,
         .fixed_mclk = I2S_PIN_NO_CHANGE};
-    ESP_LOGI(TAG, "pre i2s_driver_install");
     if (i2s_driver_install((i2s_port_t)portNo, &i2s_config_dac, 0, NULL) != ESP_OK)
     {
       ESP_LOGE(TAG, "ERROR: Unable to install I2S drives");
     }
-    ESP_LOGI(TAG, "post i2s_driver_install");
     if (output_mode == INTERNAL_DAC || output_mode == INTERNAL_PDM)
     {
-      ESP_LOGI(TAG, "pre i2s_set_pin");
       i2s_set_pin((i2s_port_t)portNo, NULL);
       i2s_set_dac_mode(I2S_DAC_CHANNEL_BOTH_EN);
-       ESP_LOGI(TAG, "post i2s_set_dac_mode");
     }
     else
     {
       SetPinout();
     }
     i2s_zero_dma_buffer((i2s_port_t)portNo);
-    ESP_LOGI(TAG, "post i2s_zero_dma_buffer((i2s_port_t)portNo)");
   }
   i2sOn = true;
   SetRate(hertz); // Default
-  ESP_LOGI(TAG, "post SetRate(hertz);");
   return true;
 }
 

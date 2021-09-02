@@ -264,7 +264,7 @@ bool AudioGeneratorMP3::begin(AudioFileSource *source, AudioOutput *output)
   if (!output) return false;
   this->output = output;
   if (!file->isOpen()) {
-    ESP_LOGI(TAG, "MP3 source file not open");
+    ESP_LOGW(TAG, "MP3 source file not open");
     return false; // Error
   }
   // Reset error count from previous file
@@ -292,7 +292,7 @@ bool AudioGeneratorMP3::begin(AudioFileSource *source, AudioOutput *output)
       synth = reinterpret_cast<struct mad_synth *>(preallocateSynthSpace);
     }
     else {
-      ESP_LOGI(TAG, "OOM error in MP3:  Want %d/%d/%d/%d bytes, have %d/%d/%d/%d bytes preallocated.",
+      ESP_LOGE(TAG, "OOM error in MP3:  Want %d/%d/%d/%d bytes, have %d/%d/%d/%d bytes preallocated.",
           preAllocBuffSize(), preAllocStreamSize(), preAllocFrameSize(), preAllocSynthSize(),
           preallocateSize, preallocateStreamSize, preallocateFrameSize, preallocateSynthSize);
       return false;
@@ -309,7 +309,7 @@ bool AudioGeneratorMP3::begin(AudioFileSource *source, AudioOutput *output)
     p += preAllocSynthSize();
     int neededBytes = p - reinterpret_cast<uint8_t *>(preallocateSpace);
     if (neededBytes > preallocateSize) {
-      ESP_LOGI(TAG, "OOM error in MP3:  Want %d bytes, have %d bytes preallocated.\n", neededBytes, preallocateSize);
+      ESP_LOGE(TAG, "OOM error in MP3:  Want %d bytes, have %d bytes preallocated.\n", neededBytes, preallocateSize);
       return false;
     }
   } else {

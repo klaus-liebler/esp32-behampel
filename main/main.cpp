@@ -10,15 +10,16 @@
 #include <sys/param.h>
 #include <nvs_flash.h>
 #include <esp_netif.h>
-
-#include "network.h"
 #include <esp_http_server.h>
 #include <mqtt_client.h>
-
 #include <driver/ledc.h>
 #include <driver/i2c.h>
 #include <driver/rmt.h>
+
+
+#include "network.h"
 #include <bme280.hh>
+#include <ccs811.hh>
 #include <owb.h>
 #include <owb_rmt.h>
 #include <ds18b20.h>
@@ -27,7 +28,6 @@
 #include "ws2812_strip.hh"
 #include "esp_log.h"
 
-//#include "ringtoneplayer.hh"
 #include "Alarm.mp3.h"
 #include "mp3player.hh"
 
@@ -61,6 +61,10 @@ WS2812_Strip<LED_NUMBER> *strip = NULL;
 //Managementobjekt für den Temperatur/Luftdruck/Luftfeuchtigkeitssensor
 BME280 *bme280;
 
+//Managementobjekt für den Luftqualitätssensor
+CCS811Manager *ccs811;
+
+
 //Managementobjekte für den präzisen 1Wire-Temperatursensor
 DS18B20_Info *ds18b20_info = NULL;
 owb_rmt_driver_info rmt_driver_info;
@@ -76,7 +80,10 @@ httpd_handle_t server=NULL;
 esp_mqtt_client_handle_t mqttClient;
 
 //"Datenmodell" durch einfache globale Variablen
-float temperature, humidity, pressure, co2;
+float temperature;
+float humidity{0};
+float pressure{0};
+uint16_t co2{0};
 
 //"Schmierblatt", um ein JSON-Datenpaket zusammenbauen zu können (max. 300 Zeichen lang...)
 char jsonBuffer[300];
@@ -165,7 +172,7 @@ extern "C" void mqtt_event_handler(void *handler_args, esp_event_base_t base, in
 
 
 
-//Funktion wird automatisch vom Framework einmalig beim einschalten bzw nach Reset aufgerufen
+//Funktion wird automatisch vom Framework einmalig beim Einschalten bzw nach Reset aufgerufen
 extern "C" void app_main()
 {
   //Willkommens-Meldung auf dem Bildschirm des angeschlossenen PCs ("serielle Konsole") ausgeben
@@ -219,6 +226,16 @@ extern "C" void app_main()
     ESP_LOGW(TAG, "I2C: BME280 not found");
   }
 
+  ccs811 = new CCS811Manager((i2c_port_t)I2C_PORT, (gpio_num_t)GPIO_NUM_NC, CCS811::ADDRESS::ADDR0);
+  if(ccs811->Init()==ESP_OK){
+    ccs811->Start(CCS811::MODE::_1SEC);
+    ESP_LOGI(TAG, "I2C: CCS811 successfully initialized and started.");
+  }
+   else{
+    ESP_LOGW(TAG, "I2C: CCS811 not found");
+  }
+  
+
   //Konfiguriere die OneWire-Schnittstelle und direkt auch den einen daran angeschlossenen Temperattursensor
   ESP_LOGI(TAG, "Start DS18B20:");
   owb = owb_rmt_initialize(&rmt_driver_info, PIN_ONEWIRE, CHANNEL_ONEWIRE_TX, CHANNEL_ONEWIRE_RX);
@@ -268,9 +285,13 @@ extern "C" void app_main()
     if (now - lastSensorUpdate > 5000)
     {
       //Zuerst vom BME280
-      float dummy;
-      bme280->GetDataAndTriggerNextMeasurement(&dummy, &pressure, &humidity);
+      float dummyF;
+      bme280->GetDataAndTriggerNextMeasurement(&dummyF, &pressure, &humidity);
       pressure/=100;
+
+      uint16_t dummyU16[3];
+      //dann vom CCS811
+      ccs811->Read(&co2, dummyU16, dummyU16+1, dummyU16+2);
 
       //Hole die Temperatur vom präzisen OneWire-Sensor und starte direkt den nächsten Messzyklus
       ds18b20_read_temp(ds18b20_info, &(temperature));
@@ -278,7 +299,7 @@ extern "C" void app_main()
 
       //...und bastele aus den Messdaten ein JSON-Datenpaket zusammen
       const char *state = co2 < 800.0 ? "Gut" : "Schlecht";
-      snprintf(jsonBuffer, sizeof(jsonBuffer), "{\"state\":\"%s\",\"temperature\":%.1f,\"humidity\":%.0f, \"pressure\":%.0f, \"co2\":%.0f}", state, temperature, humidity, pressure, co2);
+      snprintf(jsonBuffer, sizeof(jsonBuffer), "{\"state\":\"%s\",\"temperature\":%.1f,\"humidity\":%.0f, \"pressure\":%.0f, \"co2\":%.0d}", state, temperature, humidity, pressure, co2);
       ESP_LOGI(TAG, "%s", jsonBuffer);
 
       //...und führe die Lampen-Sound-Logik aus
@@ -323,3 +344,4 @@ extern "C" void app_main()
     vTaskDelay(1);
   }
 }
+

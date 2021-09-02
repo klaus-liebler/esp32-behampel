@@ -37,6 +37,9 @@ esp_err_t I2C::WriteReg(const i2c_port_t port, uint8_t address7bit, uint8_t reg_
     espRc = i2c_master_cmd_begin(port, cmd, 10 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
     xSemaphoreGive(locks[port]);
+    if(espRc!=ESP_OK){
+        ESP_LOGE(TAG, "Error %d", espRc);
+    }
     return espRc;
 }
 
