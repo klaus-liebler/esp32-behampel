@@ -1,124 +1,117 @@
 #pragma once
-#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
-#include <sys/cdefs.h>
-#include "esp_log.h"
-#include "esp_attr.h"
-#include "driver/rmt.h"
-#include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "driver/rmt.h"
+#include <esp_log.h>
+#include <driver/spi_master.h>
+#include <driver/gpio.h>
 #include "crgb.hh"
-
-constexpr uint32_t counter_clk_hz = 40000000;
-
-constexpr uint32_t WS2812_T0H_NS =(400);
-constexpr uint32_t WS2812_T0L_NS =(1000);
-constexpr uint32_t WS2812_T1H_NS =(1000);
-constexpr uint32_t WS2812_T1L_NS =(400);
-constexpr uint32_t WS2812_RESET_US =(280);
-
-// ns -> ticks
-constexpr float ratio = (float)counter_clk_hz / 1e9;
-constexpr uint32_t ws2812_t0h_ticks = (uint32_t)(ratio * WS2812_T0H_NS);
-constexpr uint32_t ws2812_t0l_ticks = (uint32_t)(ratio * WS2812_T0L_NS);
-constexpr uint32_t ws2812_t1h_ticks = (uint32_t)(ratio * WS2812_T1H_NS);
-constexpr uint32_t ws2812_t1l_ticks = (uint32_t)(ratio * WS2812_T1L_NS);
-
 #define TAG "WS2812"
 
-/**
- * @brief Convert RGB data to RMT format.
- *
- * @note For WS2812, R,G,B each contains 256 different choices (i.e. uint8_t)
- *
- * @param[in] src: source data, to converted to RMT format
- * @param[in] dest: place where to store the convert result
- * @param[in] src_size: size of source data
- * @param[in] wanted_num: number of RMT items that want to get
- * @param[out] translated_size: number of source data that got converted
- * @param[out] item_num: number of RMT items which are converted from source data
- */
-static void IRAM_ATTR ws2812_rmt_adapter(const void *src, rmt_item32_t *dest, size_t src_size, size_t wanted_num, size_t *translated_size, size_t *item_num)
-{
-    if (src == NULL || dest == NULL) {
-        *translated_size = 0;
-        *item_num = 0;
-        return;
-    }
-    const rmt_item32_t bit0 = {{{ ws2812_t0h_ticks, 1, ws2812_t0l_ticks, 0 }}}; //Logical 0
-    const rmt_item32_t bit1 = {{{ ws2812_t1h_ticks, 1, ws2812_t1l_ticks, 0 }}}; //Logical 1
-    size_t size = 0;
-    size_t num = 0;
-    uint8_t *psrc = (uint8_t *)src;
-    rmt_item32_t *pdest = dest;
-    while (size < src_size && num < wanted_num) {
-        for (int i = 0; i < 8; i++) {
-            // MSB first
-            if (*psrc & (1 << (7 - i))) {
-                pdest->val =  bit1.val;
-            } else {
-                pdest->val =  bit0.val;
-            }
-            num++;
-            pdest++;
-        }
-        size++;
-        psrc++;
-    }
-    *translated_size = size;
-    *item_num = num;
-}
 
 template <size_t LEDSIZE>
 class WS2812_Strip{
 private:
-    uint8_t buffer[3*LEDSIZE];
-    rmt_channel_t channel;
+    //static constexpr size_t  LED_DMA_BUFFER_SIZE =((LEDSIZE * 16 * (24/4)))+1;
+    //3.2MHz --> spi bit time = 312,5ns
+    //4 spi bits are used to transfer one WS2812 bit
+    //data bit time = 1250ns
+    //reset impulse = 50us = 40 data bit time (48 to be safe and have a "modulo 8==0" number to improve memory alignment)
+    static constexpr size_t  LED_DMA_BUFFER_SIZE =(LEDSIZE * 24 /*data bits per LED*/ +48 /*reset pulse*/) * 4 /*spi bits per data bit*/ / 8 /*bits per byte*/;
+    uint16_t* buffer;
+    uint32_t table[LEDSIZE];
+    spi_device_handle_t spi_device_handle=NULL;
+
 public:
-    WS2812_Strip(rmt_channel_t channel):channel(channel){
-        memset(this->buffer, 0, 3*LEDSIZE);
+    WS2812_Strip(){
+        
     }
 
-    esp_err_t SetPixel(size_t index, CRGB color){
+    esp_err_t SetPixel(size_t index, CRGB color, bool refresh=false){
         index=index%LEDSIZE;
-        this->buffer[3*index+0]=color.g;
-        this->buffer[3*index+1]=color.r;
-        this->buffer[3*index+2]=color.b;
+        this->table[index]=color.raw32 ;
+        if(refresh) this->Refresh(1000);
         return ESP_OK;
     }
 
 
     esp_err_t Refresh(uint32_t timeout_ms){
-        ESP_ERROR_CHECK(rmt_write_sample(this->channel, this->buffer, 3*LEDSIZE, true));
-        return rmt_wait_tx_done(this->channel, pdMS_TO_TICKS(timeout_ms));
+        static const uint16_t LedBitPattern[16] = {
+            0x8888,
+            0x8C88,
+            0xC888,
+            0xCC88,
+            0x888C,
+            0x8C8C,
+            0xC88C,
+            0xCC8C,
+            0x88C8,
+            0x8CC8,
+            0xC8C8,
+            0xCCC8,
+            0x88CC,
+            0x8CCC,
+            0xC8CC,
+            0xCCCC
+        };
+        uint32_t i;
+        int n = 0;
+        for (i = 0; i < LEDSIZE; i++) {
+            uint32_t temp = table[i];// Data you want to write to each LEDs, I'm my case it's 95 RGB x 3 color
+
+            //R
+            buffer[n++] = LedBitPattern[0x0f & (temp >>12)];
+            buffer[n++] = LedBitPattern[0x0f & (temp)>>8];
+
+            //G
+            buffer[n++] = LedBitPattern[0x0f & (temp >>4)];
+            buffer[n++] = LedBitPattern[0x0f & (temp)];
+
+            //B
+            buffer[n++] = LedBitPattern[0x0f & (temp >>20)];
+            buffer[n++] = LedBitPattern[0x0f & (temp)>>16];
+
+        }
+
+        spi_transaction_t t={};
+        t.length = LED_DMA_BUFFER_SIZE * 8; //length is in bits
+        t.tx_buffer = buffer;
+
+        ESP_ERROR_CHECK(spi_device_transmit(this->spi_device_handle, &t));
+        return ESP_OK;
+   
     }
 
     esp_err_t Clear(uint32_t timeout_ms){
-        memset(this->buffer, 0, 3*LEDSIZE);
+        CRGB black = CRGB::Black;
+        memset(table, black.raw32, LEDSIZE*sizeof(uint32_t));
         return Refresh(timeout_ms);
     }
    
-    esp_err_t Init(const gpio_num_t gpio){
-        rmt_config_t config;
-        config.rmt_mode=RMT_MODE_TX;
-        config.channel=this->channel;
-        config.gpio_num=gpio;
-        config.clk_div=2;
-        config.mem_block_num=1;
-        config.flags=0;
-        config.tx_config.carrier_freq_hz=38000;
-        config.tx_config.carrier_level=RMT_CARRIER_LEVEL_HIGH;
-        config.tx_config.idle_level=RMT_IDLE_LEVEL_LOW;
-        config.tx_config.carrier_duty_percent=33,
-        config.tx_config.carrier_en=false;
-        config.tx_config.loop_en=false;
-        config.tx_config.idle_output_en=true;  
-        ESP_ERROR_CHECK(rmt_config(&config));
-        ESP_ERROR_CHECK(rmt_driver_install(config.channel, 0, 0));
-        rmt_translator_init(this->channel, ws2812_rmt_adapter);
+    esp_err_t Init(const spi_host_device_t spi_host, const gpio_num_t gpio, const int dma_channel){
+        spi_bus_config_t bus_config={};
+        bus_config.miso_io_num=GPIO_NUM_NC;
+        bus_config.mosi_io_num=gpio;
+        bus_config.sclk_io_num=GPIO_NUM_NC;
+        bus_config.quadwp_io_num=GPIO_NUM_NC;
+        bus_config.quadhd_io_num=GPIO_NUM_NC;
+        bus_config.max_transfer_sz=LED_DMA_BUFFER_SIZE;
+        ESP_ERROR_CHECK(spi_bus_initialize(spi_host, &bus_config, dma_channel));
+        spi_device_interface_config_t dev_config={};
+        dev_config.clock_speed_hz=3.2*1000*1000;
+        dev_config.mode=0,
+        dev_config.spics_io_num=GPIO_NUM_NC;
+        dev_config.queue_size=1;
+        dev_config.command_bits=0;
+        dev_config.address_bits=0;
+        ESP_ERROR_CHECK(spi_bus_add_device(spi_host, &dev_config, &this->spi_device_handle));
+        
+        this->buffer = static_cast<uint16_t*>(heap_caps_malloc(LED_DMA_BUFFER_SIZE, MALLOC_CAP_DMA)); // Critical to be DMA memory.
+        if(this->buffer == NULL){
+            ESP_LOGE(TAG, "LED DMA Buffer can not be allocated");
+            return ESP_FAIL;
+        }
+        memset(this->buffer, 0, LED_DMA_BUFFER_SIZE);
+        Clear(1000);
         return ESP_OK;
     }
 };

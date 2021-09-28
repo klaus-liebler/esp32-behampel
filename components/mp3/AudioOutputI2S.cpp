@@ -187,15 +187,16 @@ bool AudioOutputI2S::begin(bool txDAC)
         .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
         .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
         .communication_format = comm_fmt,
-        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1, // lowest interrupt priority
+        .intr_alloc_flags = ESP_INTR_FLAG_LOWMED,
         .dma_buf_count = dma_buf_count,
-        .dma_buf_len = 64,
+        .dma_buf_len = 32,
         .use_apll = use_apll, // Use audio PLL
         .tx_desc_auto_clear = false,
         .fixed_mclk = I2S_PIN_NO_CHANGE};
-    if (i2s_driver_install((i2s_port_t)portNo, &i2s_config_dac, 0, NULL) != ESP_OK)
+    esp_err_t err = i2s_driver_install((i2s_port_t)portNo, &i2s_config_dac, 0, NULL);
+    if (err != ESP_OK)
     {
-      ESP_LOGE(TAG, "ERROR: Unable to install I2S drives");
+      ESP_LOGE(TAG, "ERROR: Unable to install I2S driver: %s", esp_err_to_name(err));
     }
     if (output_mode == INTERNAL_DAC || output_mode == INTERNAL_PDM)
     {

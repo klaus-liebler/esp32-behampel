@@ -69,6 +69,10 @@ public:
         ESP_ERROR_CHECK(ledc_channel_config(&buzzer_channel));
     }
 
+    void PlaySong(RINGTONE_SONG songNumber){
+        PlaySong((uint32_t)songNumber);
+    }
+
     void PlaySong(uint32_t songNumber)
     {
         if (songNumber >= sizeof(SONGS) / sizeof(Note))
@@ -90,7 +94,7 @@ public:
         const Note note = SONGS[songNumber][song_nextNoteIndex];
         if (note.freq == 0)
         {
-            ESP_LOGI(TAG, "Mute Note and wait %d", note.durationMs);
+            ESP_LOGD(TAG, "Mute Note and wait %d", note.durationMs);
             EndBuzzer();
             if (note.durationMs == 0)
             {
@@ -106,7 +110,7 @@ public:
         }
         else
         {
-            ESP_LOGI(TAG, "Set Note to Frequency %d and wait %d", note.freq, note.durationMs);
+            ESP_LOGD(TAG, "Set Note to Frequency %d and wait %d", note.freq, note.durationMs);
             StartBuzzer(note.freq);
             song_nextNoteTimeMs += note.durationMs;
             song_nextNoteIndex++;

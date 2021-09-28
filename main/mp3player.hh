@@ -3,7 +3,7 @@
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
 #include "AudioOutputI2SNoDAC.h"
-
+#include "AudioOutputNull.h"
 #define TAG "PLAYER"
 
 class MP3Player
@@ -12,6 +12,7 @@ public:
     void SetupInternalDAC()
     {
         out = new AudioOutputI2S(0, 1);
+        //out = new AudioOutputNull();
     }
 
     void Play(const uint8_t *data, size_t length)
@@ -19,9 +20,10 @@ public:
         if(gen && gen->isRunning()) return;
         file = new AudioFileSourcePROGMEM(data, length);
         id3 = new AudioFileSourceID3(file);
-        id3->RegisterMetadataCB(MP3Player::MDCallback, (void*)"ID3TAG");
+        //id3->RegisterMetadataCB(MP3Player::MDCallback, (void*)"ID3TAG");
         gen = new AudioGeneratorMP3();
         gen->begin(id3, out);
+        ESP_LOGI(TAG, "Player started");
     }
 
     void Loop(){
@@ -50,7 +52,7 @@ public:
 private:
     AudioGeneratorMP3 *gen;
     AudioFileSourcePROGMEM *file;
-    AudioOutputI2S *out;
+    AudioOutput *out;
     AudioFileSourceID3 *id3;
 };
 

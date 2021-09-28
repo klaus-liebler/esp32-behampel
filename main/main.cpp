@@ -15,7 +15,7 @@
 #include <driver/ledc.h>
 #include <driver/i2c.h>
 #include <driver/rmt.h>
-
+#include <driver/spi_common.h>
 
 #include "network.h"
 #include <bme280.hh>
@@ -28,8 +28,7 @@
 #include "ws2812_strip.hh"
 #include "esp_log.h"
 
-#include "Alarm.mp3.h"
-#include "mp3player.hh"
+#include "ringtoneplayer.hh"
 
 #define TAG "main"
 
@@ -37,25 +36,26 @@
 //Hier wird festgelegt, an welchen Anschlüssen der CPU welche anderen Bauteile angeschlossen sind.
 //Der ESP32 ist da sehr flexibel, und kann fast(!) alle Funktionen an fast(!) alle Pins legen
 constexpr gpio_num_t PIN_LED_STRIP = GPIO_NUM_26;
+constexpr gpio_num_t PIN_SPEAKER = GPIO_NUM_25;
 constexpr gpio_num_t PIN_ONEWIRE = GPIO_NUM_14;
 constexpr gpio_num_t PIN_I2C_SDA = GPIO_NUM_22;
 constexpr gpio_num_t PIN_I2C_SCL = GPIO_NUM_21;
 
 
 constexpr size_t LED_NUMBER = 8;
-constexpr uint32_t TIMEOUT_FOR_LED_STRIP = 1000;
 //Festlegung, welche internen Funktionseinheiten verwendet werden sollen
 constexpr uint8_t I2C_PORT = 1;
-constexpr rmt_channel_t CHANNEL_WS2812 = RMT_CHANNEL_0;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_TX = RMT_CHANNEL_1;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_RX = RMT_CHANNEL_2;
-
+constexpr spi_host_device_t SPI_HOST_WS2812 =HSPI_HOST;
+constexpr spi_common_dma_t DMA_CHANNEL_WS2812 = SPI_DMA_CH1;
+constexpr int TIMEOUT_FOR_LED_STRIP = 1000;
 
 //Managementobjekt für die RGB-LEDs
 WS2812_Strip<LED_NUMBER> *strip = NULL;
 
 //Managementobjekt für den Temperatur/Luftdruck/Luftfeuchtigkeitssensor
-BME280 *bme280;
+BME280 *bme280; //Deklaration und Definition eines Pointers auf ein Objekt der "BME280"-Klasse
 
 //Managementobjekt für den Luftqualitätssensor
 CCS811Manager *ccs811;
@@ -66,10 +66,13 @@ owb_rmt_driver_info rmt_driver_info;
 OneWireBus *owb;
 
 //Managementobjekte für die Sound-Wiedergabe
-MP3Player mp3player;
+//MP3Player mp3player;
+Ringtoneplayer ringtoneplayer;
+
+
 
 //Managementobjekte für den Webserver
-httpd_handle_t server=NULL;
+httpd_handle_t server = NULL;
 
 //Managementobjekt MQTT client
 esp_mqtt_client_handle_t mqttClient;
@@ -83,7 +86,7 @@ uint16_t co2{0}; // 16bit = 65536 verschiedene Werte. Weil "unsigned", wird das 
 //"Schmierblatt", um ein JSON-Datenpaket zusammenbauen zu können (max. 300 Zeichen lang...)
 char jsonBuffer[300];
 
-//Merkt sich, ob der Warnton beim Überschreiten eines kritischen Messwertes bereits ausgegeben wurde. 
+//Merkt sich, ob der Warnton beim Überschreiten eines kritischen Messwertes bereits ausgegeben wurde.
 //Verhindert mit der entsprechenden Logik (s.u.), dass die Warnung in jedem Schleifendurchlauf ausgegeben wird
 bool hasAlreadyPlayedTheWarnSound = false;
 
@@ -100,8 +103,8 @@ esp_err_t handle_get_root(httpd_req_t *req)
   return ESP_OK;
 }
 static const httpd_uri_t get_root = {
-    .uri = "/*", //wenn immer ein Browser mit irgendeiner (*!) Adresse den labathome anfragt..
-    .method = HTTP_GET, //...und zwar mit dem "Standardanfragetyp" "GET"
+    .uri = "/*",                //wenn immer ein Browser mit irgendeiner (*!) Adresse den labathome anfragt..
+    .method = HTTP_GET,         //...und zwar mit dem "Standardanfragetyp" "GET"
     .handler = handle_get_root, //...dann mache bitte das, was in dieser Funktion steht
     .user_ctx = 0,
 };
@@ -123,12 +126,12 @@ static const httpd_uri_t get_data = {
 
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 //Konfiguration des MQTT-Clients
-static const esp_mqtt_client_config_t mqtt_cfg={
-  .uri = CONFIG_MQTT_SERVER,
-  .port = CONFIG_MQTT_PORT,
-  .username = CONFIG_MQTT_USER,
-  .password = CONFIG_MQTT_PASS,
-  .refresh_connection_after_ms=0,
+static const esp_mqtt_client_config_t mqtt_cfg = {
+    .uri = CONFIG_MQTT_SERVER,
+    .port = CONFIG_MQTT_PORT,
+    .username = CONFIG_MQTT_USER,
+    .password = CONFIG_MQTT_PASS,
+    .refresh_connection_after_ms = 0,
 };
 
 //Hilfsfunktion, um die abgelaufene Zeit in ms zu bekommen
@@ -169,6 +172,7 @@ extern "C" void mqtt_event_handler(void *handler_args, esp_event_base_t base, in
 
 
 
+
 //Funktion wird automatisch vom Framework einmalig beim Einschalten bzw nach Reset aufgerufen
 extern "C" void app_main()
 {
@@ -181,7 +185,7 @@ extern "C" void app_main()
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   ESP_ERROR_CHECK(connectBlocking());
 
-  //Verbindung steht. 
+  //Verbindung steht.
   //Starte jetzt den HTTP-Server
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
@@ -212,8 +216,11 @@ extern "C" void app_main()
 
   //Baut die Verbindung mit dem BME280 auf (unter Nutzung der zuvor konfigurierten I2C-Schnittstelle)
   uint32_t bme280ReadoutIntervalMs = UINT32_MAX;
-  bme280 = new BME280(I2C_PORT, BME280_ADRESS::PRIM);
-  if (bme280->Init(&bme280ReadoutIntervalMs) == ESP_OK)
+  //...
+  bme280 = new BME280(I2C_PORT, BME280_ADRESS::PRIM); //Erzeugung eines BME280-Objektes mit "new"
+
+  if (bme280->Init(&bme280ReadoutIntervalMs) == ESP_OK) //Nutzung einer Funktion -> derefernziert
+  //(*bme280).Init(&bme280ReadoutIntervalMs) //Alternative zum vorherigen Aufruf
   {
     bme280->TriggerNextMeasurement();
     ESP_LOGI(TAG, "I2C: BME280 successfully initialized.");
@@ -225,14 +232,15 @@ extern "C" void app_main()
 
   //CCS811
   ccs811 = new CCS811Manager((i2c_port_t)I2C_PORT, (gpio_num_t)GPIO_NUM_NC, CCS811::ADDRESS::ADDR0);
-  if(ccs811->Init()==ESP_OK){
+  if (ccs811->Init() == ESP_OK)
+  {
     ccs811->Start(CCS811::MODE::_1SEC);
     ESP_LOGI(TAG, "I2C: CCS811 successfully initialized and started.");
   }
-   else{
+  else
+  {
     ESP_LOGW(TAG, "I2C: CCS811 not found");
   }
-  
 
   //Konfiguriere die OneWire-Schnittstelle und direkt auch den einen daran angeschlossenen Temperattursensor
   ESP_LOGI(TAG, "Start DS18B20:");
@@ -255,26 +263,39 @@ extern "C" void app_main()
   }
 
   //Konfiguriert den 8fach-RGB-LED-Strip
-  strip = new WS2812_Strip<LED_NUMBER>(CHANNEL_WS2812);
-  ESP_ERROR_CHECK(strip->Init(PIN_LED_STRIP));
-  ESP_ERROR_CHECK(strip->Clear(TIMEOUT_FOR_LED_STRIP));
+  strip = new WS2812_Strip<LED_NUMBER>();
+  ESP_ERROR_CHECK(strip->Init(SPI_HOST_WS2812, PIN_LED_STRIP, DMA_CHANNEL_WS2812));
   strip->SetPixel(0, CRGB::Red);
   strip->SetPixel(1, CRGB::Green);
   strip->SetPixel(2, CRGB::Blue);
   strip->Refresh(TIMEOUT_FOR_LED_STRIP);
   ESP_LOGI(TAG, "LED: WS2812_Strip successfully initialized (if you see a red, green and blue)");
+  
 
   //Konfiguriert die Tonwiedergabe
-  mp3player.SetupInternalDAC();
-  //mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
-  //mp3player.Loop();
+   ringtoneplayer.Setup(LEDC_TIMER_2, LEDC_CHANNEL_2, PIN_SPEAKER);
+   ringtoneplayer.PlaySong(RINGTONE_SONG::POSITIVE);
+ 
 
   // Die ganze Initializierung und Konfiguration ist an dieser Stelle zu Ende (puuuh...) - ab hier beginnt die "Endlos-Arbeits-Schleife"
 
   while (true)
   {
-    //Der Musik-Player muss permanent prüfen, ob er eine neue Note auf dem Lautsprecher ausgeben sollte. Das tut er hier
-    //mp3player.Loop();
+    while(false){
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      strip->SetPixel(0, CRGB::Yellow);
+      strip->SetPixel(1, CRGB::Green);
+      strip->SetPixel(2, CRGB::Orange);
+      strip->Refresh(TIMEOUT_FOR_LED_STRIP);
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      strip->SetPixel(0, CRGB::Blue);
+      strip->SetPixel(1, CRGB::Violet);
+      strip->SetPixel(2, CRGB::SandyBrown);
+      strip->Refresh(TIMEOUT_FOR_LED_STRIP);
+    }
+    ringtoneplayer.Loop();
+    
+   
 
     //Hole die aktuelle Zeit
     uint64_t now = GetMillis64();
@@ -285,11 +306,11 @@ extern "C" void app_main()
       //Zuerst vom BME280
       float dummyF;
       bme280->GetDataAndTriggerNextMeasurement(&dummyF, &pressure, &humidity);
-      pressure=pressure/100;
+      pressure = pressure / 100;
 
       uint16_t dummyU16[3];
       //dann vom CCS811
-      ccs811->Read(&co2, dummyU16, dummyU16+1, dummyU16+2);
+      ccs811->Read(&co2, dummyU16, dummyU16 + 1, dummyU16 + 2);
 
       //Hole die Temperatur vom präzisen OneWire-Sensor und starte direkt den nächsten Messzyklus
       ds18b20_read_temp(ds18b20_info, &(temperature));
@@ -320,7 +341,7 @@ extern "C" void app_main()
       {
         if (!hasAlreadyPlayedTheWarnSound)
         {
-          //mp3player.Play(Alarm_mp3, sizeof(Alarm_mp3));
+          ringtoneplayer.PlaySong(RINGTONE_SONG::BOND_007);
           hasAlreadyPlayedTheWarnSound = true;
         }
       }
@@ -342,4 +363,3 @@ extern "C" void app_main()
     vTaskDelay(1);
   }
 }
-
