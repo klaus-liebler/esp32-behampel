@@ -51,8 +51,7 @@ public:                                                                         
   esp_err_t Init(void);                                                                                        // Reset the CCS811, switch to app mode and check HW_ID. Returns false on problems.
   esp_err_t Start(CCS811::MODE mode);                                                                           // Switch CCS811 to `mode`, use constants CCS811_MODE_XXX. Returns false on I2C problems.
   esp_err_t Read(uint16_t *eco2, uint16_t *etvoc, uint16_t *errstat, uint16_t *raw);                           // Get measurement results from the CCS811 (all args may be NULL), check status via errstat, e.g. ccs811_errstat(errstat)
-  const char *errstat_str(uint16_t errstat);                                                                   // Returns a string version of an errstat. Note, each call, this string is updated.
-public:                                                                                                        // Extra interface
+  const char *errstat_str(uint16_t errstat);                                                                   // Returns a string version of an errstat. Note, each call, this string is updated.                                                                                                      // Extra interface
   int hardware_version(void);                                                                                  // Gets version of the CCS811 hardware (returns -1 on I2C failure).
   int bootloader_version(void);                                                                                // Gets version of the CCS811 bootloader (returns -1 on I2C failure).
   int application_version(void);                                                                               // Gets version of the CCS811 application (returns -1 on I2C failure).

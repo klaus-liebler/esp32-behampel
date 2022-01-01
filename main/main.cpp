@@ -16,6 +16,7 @@
 #include <driver/i2c.h>
 #include <driver/rmt.h>
 #include <driver/spi_common.h>
+#include <driver/dac.h>
 
 #include "network.h"
 #include <bme280.hh>
@@ -28,7 +29,8 @@
 #include "ws2812_strip.hh"
 #include "esp_log.h"
 
-#include "ringtoneplayer.hh"
+#include "MP3Player.hh"
+#include "Alarm.mp3.h"
 
 #define TAG "main"
 
@@ -41,13 +43,12 @@ constexpr gpio_num_t PIN_ONEWIRE = GPIO_NUM_14;
 constexpr gpio_num_t PIN_I2C_SDA = GPIO_NUM_22;
 constexpr gpio_num_t PIN_I2C_SCL = GPIO_NUM_21;
 
-
 constexpr size_t LED_NUMBER = 8;
 //Festlegung, welche internen Funktionseinheiten verwendet werden sollen
 constexpr uint8_t I2C_PORT = 1;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_TX = RMT_CHANNEL_1;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_RX = RMT_CHANNEL_2;
-constexpr spi_host_device_t SPI_HOST_WS2812 =HSPI_HOST;
+constexpr spi_host_device_t SPI_HOST_WS2812 = HSPI_HOST;
 constexpr spi_common_dma_t DMA_CHANNEL_WS2812 = SPI_DMA_CH1;
 constexpr int TIMEOUT_FOR_LED_STRIP = 1000;
 
@@ -66,10 +67,7 @@ owb_rmt_driver_info rmt_driver_info;
 OneWireBus *owb;
 
 //Managementobjekte für die Sound-Wiedergabe
-//MP3Player mp3player;
-Ringtoneplayer ringtoneplayer;
-
-
+MP3Player mp3player;
 
 //Managementobjekte für den Webserver
 httpd_handle_t server = NULL;
@@ -92,7 +90,6 @@ bool hasAlreadyPlayedTheWarnSound = false;
 
 //Bindet die Datei index.html als Rohtext-Variable ein
 #include "index.html"
-
 
 //Konfiguration des Webservers
 //letztlich die Festlegung, was gemacht werden soll, wenn eine bestimmte URL aufgerufen wird
@@ -170,9 +167,6 @@ extern "C" void mqtt_event_handler(void *handler_args, esp_event_base_t base, in
   }
 }
 
-
-
-
 //Funktion wird automatisch vom Framework einmalig beim Einschalten bzw nach Reset aufgerufen
 extern "C" void app_main()
 {
@@ -200,7 +194,6 @@ extern "C" void app_main()
   mqttClient = esp_mqtt_client_init(&mqtt_cfg);
   esp_mqtt_client_register_event(mqttClient, (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
   esp_mqtt_client_start(mqttClient);
-  
 
   //Konfiguriert die I2C-Schnittstelle zur Anbindung der Sensoren BME280 und CCS811
   i2c_config_t conf;
@@ -210,6 +203,7 @@ extern "C" void app_main()
   conf.scl_io_num = PIN_I2C_SCL;
   conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
   conf.master.clk_speed = 100000;
+  conf.clk_flags = 0;
   i2c_param_config(I2C_PORT, &conf);
   ESP_ERROR_CHECK(i2c_driver_install(I2C_PORT, conf.mode, 0, 0, 0));
   ESP_ERROR_CHECK(I2C::Init());
@@ -262,6 +256,13 @@ extern "C" void app_main()
     ESP_LOGW(TAG, "1Wire: An error occurred reading DS18B20 ROM code: %d", status);
   }
 
+   //Konfiguriert die Tonwiedergabe
+  mp3player.InitInternalDAC(I2S_DAC_CHANNEL_RIGHT_EN);
+  mp3player.Play(Alarm_ding_mp3, sizeof(Alarm_ding_mp3));
+
+  dac_output_disable(DAC_CHANNEL_2);
+  gpio_reset_pin(GPIO_NUM_26);
+
   //Konfiguriert den 8fach-RGB-LED-Strip
   strip = new WS2812_Strip<LED_NUMBER>();
   ESP_ERROR_CHECK(strip->Init(SPI_HOST_WS2812, PIN_LED_STRIP, DMA_CHANNEL_WS2812));
@@ -270,35 +271,41 @@ extern "C" void app_main()
   strip->SetPixel(2, CRGB::Blue);
   strip->Refresh(TIMEOUT_FOR_LED_STRIP);
   ESP_LOGI(TAG, "LED: WS2812_Strip successfully initialized (if you see a red, green and blue)");
-  
 
-  //Konfiguriert die Tonwiedergabe
-   ringtoneplayer.Setup(LEDC_TIMER_2, LEDC_CHANNEL_2, PIN_SPEAKER);
-   ringtoneplayer.PlaySong(RINGTONE_SONG::POSITIVE);
  
 
   // Die ganze Initializierung und Konfiguration ist an dieser Stelle zu Ende (puuuh...) - ab hier beginnt die "Endlos-Arbeits-Schleife"
-
+  int64_t lastLEDBlink{0};
+  bool blinkBVS{false};
   while (true)
   {
-    while(false){
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      strip->SetPixel(0, CRGB::Yellow);
-      strip->SetPixel(1, CRGB::Green);
-      strip->SetPixel(2, CRGB::Orange);
-      strip->Refresh(TIMEOUT_FOR_LED_STRIP);
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      strip->SetPixel(0, CRGB::Blue);
-      strip->SetPixel(1, CRGB::Violet);
-      strip->SetPixel(2, CRGB::SandyBrown);
-      strip->Refresh(TIMEOUT_FOR_LED_STRIP);
-    }
-    ringtoneplayer.Loop();
-    
-   
+
+    mp3player.Loop();
 
     //Hole die aktuelle Zeit
     uint64_t now = GetMillis64();
+
+    if (now - lastLEDBlink > 1000)
+    {
+      if (!blinkBVS)
+      {
+        strip->SetPixel(0, CRGB::Yellow);
+        strip->SetPixel(1, CRGB::Green);
+        strip->SetPixel(2, CRGB::Orange);
+        ESP_LOGI(TAG, "YELLOW GREEN ORANGE)");
+      }
+      else
+      {
+        strip->SetPixel(0, CRGB::Blue);
+        strip->SetPixel(1, CRGB::Violet);
+        strip->SetPixel(2, CRGB::SandyBrown);
+        ESP_LOGI(TAG, "Blue Violet SandyBrown)");
+      }
+
+      strip->Refresh(TIMEOUT_FOR_LED_STRIP);
+      blinkBVS = !blinkBVS;
+      lastLEDBlink = now;
+    }
 
     //Hole alle 5 Sekunden Messdaten von den Sensoren
     if (now - lastSensorUpdate > 5000)
@@ -341,7 +348,7 @@ extern "C" void app_main()
       {
         if (!hasAlreadyPlayedTheWarnSound)
         {
-          ringtoneplayer.PlaySong(RINGTONE_SONG::BOND_007);
+          mp3player.Play(Alarm_hupe_mp3, sizeof(Alarm_hupe_mp3));
           hasAlreadyPlayedTheWarnSound = true;
         }
       }
