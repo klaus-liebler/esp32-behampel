@@ -1,6 +1,5 @@
 {
   "C_Cpp.intelliSenseEngine": "Default",
-  "files.associations": {
-    "dac.h": "c"
-  }
+  "idf.portWin": "COM8",
+  "idf.adapterTargetName": "esp32"
 }

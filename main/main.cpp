@@ -18,7 +18,7 @@
 #include <driver/spi_common.h>
 #include <driver/dac.h>
 
-#include "network.h"
+#include "connect.hh"
 #include <bme280.hh>
 #include <ccs811.hh>
 #include <owb.h>
@@ -29,7 +29,7 @@
 #include "ws2812_strip.hh"
 #include "esp_log.h"
 
-#include "MP3Player.hh"
+#include "MP3PlayerXX.hh"
 #include "Alarm.mp3.h"
 
 #define TAG "main"
@@ -37,13 +37,13 @@
 //Diverse konstante Werte werden gesetzt
 //Hier wird festgelegt, an welchen Anschlüssen der CPU welche anderen Bauteile angeschlossen sind.
 //Der ESP32 ist da sehr flexibel, und kann fast(!) alle Funktionen an fast(!) alle Pins legen
-constexpr gpio_num_t PIN_LED_STRIP = GPIO_NUM_26;
+constexpr gpio_num_t PIN_LED_STRIP = GPIO_NUM_15;
 constexpr gpio_num_t PIN_SPEAKER = GPIO_NUM_25;
 constexpr gpio_num_t PIN_ONEWIRE = GPIO_NUM_14;
-constexpr gpio_num_t PIN_I2C_SDA = GPIO_NUM_22;
-constexpr gpio_num_t PIN_I2C_SCL = GPIO_NUM_21;
+constexpr gpio_num_t PIN_I2C_SDA = GPIO_NUM_19;
+constexpr gpio_num_t PIN_I2C_SCL = GPIO_NUM_22;
 
-constexpr size_t LED_NUMBER = 8;
+constexpr size_t LED_NUMBER = 4;
 //Festlegung, welche internen Funktionseinheiten verwendet werden sollen
 constexpr uint8_t I2C_PORT = 1;
 constexpr rmt_channel_t CHANNEL_ONEWIRE_TX = RMT_CHANNEL_1;
@@ -67,7 +67,7 @@ owb_rmt_driver_info rmt_driver_info;
 OneWireBus *owb;
 
 //Managementobjekte für die Sound-Wiedergabe
-MP3Player mp3player;
+MP3Decoder mp3player;
 
 //Managementobjekte für den Webserver
 httpd_handle_t server = NULL;
@@ -175,9 +175,8 @@ extern "C" void app_main()
 
   //Starte das WIFI-Netzwerk
   ESP_ERROR_CHECK(nvs_flash_init());
-  ESP_ERROR_CHECK(esp_netif_init());
-  ESP_ERROR_CHECK(esp_event_loop_create_default());
-  ESP_ERROR_CHECK(connectBlocking());
+  startNetifAndEventLoop();
+  connectSTA2AP();
 
   //Verbindung steht.
   //Starte jetzt den HTTP-Server
@@ -236,7 +235,7 @@ extern "C" void app_main()
     ESP_LOGW(TAG, "I2C: CCS811 not found");
   }
 
-  //Konfiguriere die OneWire-Schnittstelle und direkt auch den einen daran angeschlossenen Temperattursensor
+  //Konfiguriere die OneWire-Schnittstelle und direkt auch den einen daran angeschlossenen Temperatursensor
   ESP_LOGI(TAG, "Start DS18B20:");
   owb = owb_rmt_initialize(&rmt_driver_info, PIN_ONEWIRE, CHANNEL_ONEWIRE_TX, CHANNEL_ONEWIRE_RX);
   owb_use_crc(owb, true); // enable CRC check for ROM code
@@ -257,7 +256,7 @@ extern "C" void app_main()
   }
 
    //Konfiguriert die Tonwiedergabe
-  mp3player.InitInternalDAC(I2S_DAC_CHANNEL_RIGHT_EN);
+  mp3player.InitInternalDAC(I2S_DAC_CHANNEL_BOTH_EN);
   mp3player.Play(Alarm_ding_mp3, sizeof(Alarm_ding_mp3));
 
   dac_output_disable(DAC_CHANNEL_2);

@@ -108,9 +108,9 @@ public:
                 outBuffer[i]   = l;
                 outBuffer[i+1] = r;
             }
-            printf("%f ", l/32768.0);
+            //printf("%f ", l/32768.0);
         }
-        printf("\n");
+        //printf("\n");
         vTaskDelay(1);
 
         size_t i2s_bytes_write;
@@ -175,3 +175,5 @@ public:
         return ESP_OK;
     }
 };
+
+#undef TAG
